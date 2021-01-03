@@ -21,8 +21,8 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.pyplot as plt
 
 def getFullFilePath(subdir, filename):
-    dir_path = os.path.join(os.path.dirname(__file__), subdir)
-    return os.path.join(dir_path, filename)
+    root_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # directory name one-level up of directory containing this python module
+    return os.path.join(os.path.join(root_directory, subdir), filename)  
 
 def readFile(file_name, to_type):
         matrix = []

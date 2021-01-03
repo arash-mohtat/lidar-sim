@@ -5,12 +5,12 @@
 temp/
 old/
 build*
+renderings/*.csv
+renderings/*.xyz
+renderings/*.mlp
+renderings/*.png
 
 # ignore in Python folder
 Python/.vscode/
-Python/renderings/*.csv
-Python/renderings/*.xyz
-Python/renderings/*.mlp
-Python/renderings/*.png
 Python/__pycache__/
 Python/*.py[cod]
