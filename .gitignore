@@ -1,0 +1,16 @@
+# generic things to ignore in base or anywhere
+.vscode/
+*.png
+*.jpg
+temp/
+old/
+build*
+
+# ignore in Python folder
+Python/.vscode/
+Python/renderings/*.csv
+Python/renderings/*.xyz
+Python/renderings/*.mlp
+Python/renderings/*.png
+Python/__pycache__/
+Python/*.py[cod]
