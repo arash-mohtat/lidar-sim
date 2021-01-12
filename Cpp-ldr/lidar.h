@@ -30,6 +30,14 @@ struct Grid {         // ArrayXXd rather than MatrixXd (since element-wise ops a
     ArrayXXd x;       // x-measurement matrix in lidar coords
     ArrayXXd y;       // y-measurement matrix in lidar coords
     ArrayXXd z;       // z-measurement matrix in lidar coords
+    void toXYZfile(const std::string& save_file);
+};
+
+struct SphrRect { // A rectangle in AZ-EL indices to use for Grid arrays -> .block(i,j,p,q)
+    int i; // EL_top index
+    int j; // AZ_left index
+    int p; // EL_bottom_idx - EL_top_idx + 1
+    int q; // AZ_right_idx - AZ_left_idx + 1
 };
 
 class Lidar : public Body {
@@ -42,8 +50,10 @@ public:
     Grid scan(const Body& target, bool reset_measurements=true);
 
 private:
-    std::array<Matrix<double,3,Dynamic>, 2> transformCoords(const Body& target) const;
-    void castRays(const Matrix3d& trngl_xyz, const Vector3d& unit_normal);
+    void castRays(const Matrix3d& trngl_xyz, const Vector3d& unit_normal, const SphrRect& AZ_EL);
+    SphrRect findAZ_EL_slice(const Matrix3d& trngl_xyz) const;
+    static std::array<int, 2> findSlice(const double& grid0, const double& delta_grid, const int& length,
+                                        const double& val_low, const double& val_high);
     double m_range;
     FieldOfView<double> m_FOV_deg;
     FieldOfView<int> m_FOV_resolution;

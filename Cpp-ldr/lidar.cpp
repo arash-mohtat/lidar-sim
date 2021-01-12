@@ -1,8 +1,10 @@
 #include "lidar.h"
 #include <vector>
+#include <array>
 #include <iostream>
 #include <cctype>
 #include <math.h>
+#include <fstream>
 
 
 using namespace Eigen;
@@ -56,26 +58,24 @@ void Lidar::printSummary(bool summarize_also_body) const {
     if (summarize_also_body) {Body::printSummary();}
 }
 
-/* // not very useful actually!
-std::array<Matrix<double,3,Dynamic>, 2> Lidar::transformCoords(const Body& target) const {
-    MatrixXd points_cart = target.getVertices(m_transform);
-    MatrixXd point_sphr = MatrixXd::Zero(3,points_xyz.cols()); // TODO: calc actual spherical coords
-    std::cout << "transformed coordinates"<< std::endl;
-    return {points_cart, points_sphr};
-}
-*/
-
 Grid Lidar::scan(const Body& target, bool reset_measurements){
     if (reset_measurements){
         m_grid.rho = ArrayXXd::Zero(m_FOV_resolution.vertical, m_FOV_resolution.horizontal) + 2.0 * m_range;
     }
-    //Matrix4d viewpoint = this->m_transform; // lidar's viewpoint (needs to be inverted)
     std::vector<Matrix3d> triangles_xyz = target.getTriangles(m_transform); // get body triangles from lidar's point-of-view
-    for (auto trngl_xyz : triangles_xyz){
+
+    // loop through triangles and cast relevant rays on
+    int skipped_trngls = 0;
+    SphrRect AZ_EL{0, 0, m_FOV_resolution.vertical, m_FOV_resolution.horizontal}; // the entire grid
+    for (const auto& trngl_xyz : triangles_xyz){
         std::pair<bool, Vector3d> result = Aux::isValidTriangle(trngl_xyz);
-        if (!result.first) {continue;} // if tngl not valid
-        castRays(trngl_xyz, result.second); // result.second = unit_normal
+        if (!result.first) {skipped_trngls +=1; continue;} // if tngl not valid
+        //SphrRect AZ_EL = findAZ_EL_slice(trngl_xyz); // TODO: needs debugging and can replace line above for
+        if ((AZ_EL.p < 1) || (AZ_EL.q < 1)) {skipped_trngls +=1; continue;}// if slice is empty, continue
+        castRays(trngl_xyz, result.second, AZ_EL); // result.second = unit_normal
     }
+    std::cout << "#skipped triangles when scanning was: " << skipped_trngls << ", out of: " << triangles_xyz.size() << std::endl;
+
     // prep x,y,z measurements via spherical transform when all rho's are updated
     m_grid.x = m_grid.rho * cos(m_grid.EL) * sin(m_grid.AZ);
     m_grid.y = m_grid.rho * cos(m_grid.EL) * cos(m_grid.AZ);
@@ -83,12 +83,44 @@ Grid Lidar::scan(const Body& target, bool reset_measurements){
     return m_grid;
 }
 
-void Lidar::castRays(const Matrix3d& trngl_xyz, const Vector3d& unit_normal){
-    //std::cout << "Casting rays on triangle below:" << std::endl << trngl_xyz << std::endl;
+std::array<int, 2> Lidar::findSlice(const double& grid0, const double& delta_grid, const int& length,
+                                   const double& val_low, const double& val_high) {
+    int idx_low = static_cast<int> (ceil((val_low - grid0)/delta_grid));
+    int idx_high = static_cast<int> (floor((val_high - grid0)/delta_grid));
+    idx_low = std::clamp(idx_low, 0 , length-1);
+    idx_high = std::clamp(idx_high, 0 , length-1);
+    return {idx_low, idx_high - idx_low + 1}; // index low, index sequence length
+}
 
+SphrRect Lidar::findAZ_EL_slice(const Matrix3d& trngl_xyz) const {
+
+    // transform triangle vertices to spherical coords
+    Array3d rho_vertices = trngl_xyz.colwise().norm().array();
+    Array3d AZ_vertices; //Eigen doesn't support atan2 and not worth converting to valarray
+    for (int idx = 0; idx < 3; ++idx) {
+        AZ_vertices(idx) = atan2(trngl_xyz(idx, 0), trngl_xyz(idx, 1));
+    }
+    Array3d EL_vertices = asin(trngl_xyz.col(2).array()/rho_vertices); //asin(z/rho)
+
+    // find AZ and EL slices. Note: azimuths are columns growing from left to right, while elevations
+    // are rows with values decreasing from top to bottom
+    std::array<int, 2> jq = findSlice(m_grid.AZ(0,0), m_grid.AZ(0,1) - m_grid.AZ(0,0),
+                                      m_FOV_resolution.horizontal,
+                                      AZ_vertices.minCoeff(), AZ_vertices.maxCoeff()); // Left > Right
+    std::array<int, 2> ip = findSlice(m_grid.EL(0,0), m_grid.EL(1,0) - m_grid.EL(0,0),
+                                      m_FOV_resolution.vertical,
+                                      EL_vertices.maxCoeff(), EL_vertices.minCoeff()); // Top < Bottom
+
+    return SphrRect{ip[0], jq[0], ip[1], jq[1]}; // consistent with .block(i,j,p,q) in Eigen
+}
+
+void Lidar::castRays(const Matrix3d& trngl_xyz, const Vector3d& unit_normal,
+                     const SphrRect& AZ_EL){
+    //std::cout << "casting ray on this trngl:" << std::endl << trngl_xyz << std::endl;
     // construct flattened (column arrays) sine and cosine of AZ and EL of laser rays
-    Map<ArrayXd> AZ_flat(m_grid.AZ.data(), m_grid.AZ.size());
-    Map<ArrayXd> EL_flat(m_grid.EL.data(), m_grid.EL.size());
+    int block_size = AZ_EL.p * AZ_EL.q; // never should be zero or negative
+    Map<ArrayXd> AZ_flat(m_grid.AZ.block(AZ_EL.i, AZ_EL.j, AZ_EL.p, AZ_EL.q).data(), block_size);
+    Map<ArrayXd> EL_flat(m_grid.EL.block(AZ_EL.i, AZ_EL.j, AZ_EL.p, AZ_EL.q).data(), block_size);
     ArrayXd ca = cos(M_PI/2 - AZ_flat);
     ArrayXd sa = sin(M_PI/2 - AZ_flat);
     ArrayXd ce = cos(EL_flat);
@@ -97,18 +129,31 @@ void Lidar::castRays(const Matrix3d& trngl_xyz, const Vector3d& unit_normal){
     // calculate the intersection of rays with the triangle plane
     double d = unit_normal.dot(trngl_xyz.col(0));
     ArrayXd rho = d / (unit_normal(0)*ce*ca + unit_normal(1)*ce*sa + unit_normal(2)*se);
-    rho = (rho<0).select(2*m_range, rho); // set all negative rho's equal to 2*m_range
+    rho = (rho<0).select(2*m_range, rho); // to avoid backward ray intersection (when hFOV > 180)
     ArrayXXd pts_xyz_cols(rho.rows(), 3); // initialize an n-by-3 array to stack xyz points
     pts_xyz_cols << rho*ce*ca, rho*ce*sa, rho*se;
 
     // select those intersections with the plane that are actually inside the triangular mesh
-    //MatrixXd pts_xyz = pts_xyz_cols.transpose().matrix();
-    //std::cout << "scanned pts_xyz on plane size: " << pts_xyz.rows() << ", " << pts_xyz.cols() <<std::endl;
     auto cond = Aux::areInTriangle(pts_xyz_cols.transpose().matrix(), trngl_xyz, unit_normal);
     rho = cond.select(rho, 2*m_range); // set those elements of rho that dont satisfy the being-in-tringl cond to out-of-range
 
     // back to rectangular grid and min-accumulate
-    Map<ArrayXXd> rho_grid(rho.data(), m_FOV_resolution.vertical, m_FOV_resolution.horizontal);
-    m_grid.rho = rho_grid.min(m_grid.rho);
+    //std::cout << "Mapping back on grid:" << std::endl;
+    Map<ArrayXXd> rho_grid(rho.data(), AZ_EL.p, AZ_EL.q);
+    m_grid.rho.block(AZ_EL.i, AZ_EL.j, AZ_EL.p, AZ_EL.q)
+            = rho_grid.min(m_grid.rho.block(AZ_EL.i, AZ_EL.j, AZ_EL.p, AZ_EL.q));
 }
 
+void Grid::toXYZfile(const std::string& save_file){
+    // TODO: add option to discard inf (2*m_range) measurements
+    std::ofstream file(save_file);
+    if (file.is_open()) {
+        Map<ArrayXd> x_flat(x.data(), x.size());
+        Map<ArrayXd> y_flat(y.data(), y.size());
+        Map<ArrayXd> z_flat(z.data(), z.size());
+        ArrayXXd xyz(x.size(), 3);
+        xyz << x_flat, y_flat, z_flat;
+        file << xyz;
+        std::cout << "saved to file ..." << std::endl;
+      }
+}

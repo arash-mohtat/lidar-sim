@@ -21,17 +21,23 @@ Array<bool, Dynamic, 1> areInTriangle(const Matrix<double, 3, Dynamic>& pts_xyz,
                                       const Matrix3d& trngl_xyz, const Vector3d& unit_normal){
     Vector3d v1 = trngl_xyz.col(1) - trngl_xyz.col(0); // vector from vertex A to B
     v1 = v1/v1.norm(); // shouldn't need double-checking (as a valid triangle)
+    //std::cout << "v1=" << std::endl << v1 << std::endl;
     Vector3d v2 = unit_normal.cross(v1);
     Matrix<double, 3, 2> T;
     T << v1, v2; // This forms an orthonormal basis on the triangle plane which can be used for describing XY points in the plane
+    //std::cout << "T=" << std::endl << T << std::endl;
     MatrixXd pts_XY = T.transpose() * pts_xyz;
     Matrix<double,2,3> trngl_XY = T.transpose() * trngl_xyz;
-    Array2d A = pts_XY.col(0).array();
-    Array2d B = pts_XY.col(1).array() - A; // this is like v1 before normalization in XY coords (rather than xyz)
-    Array2d C = pts_XY.col(2).array() - A;
+    Array2d A = trngl_XY.col(0).array();
+    Array2d B = trngl_XY.col(1).array() - A; // this is like v1 before normalization in XY coords (rather than xyz)
+    Array2d C = trngl_XY.col(2).array() - A;
     ArrayXXd P = pts_XY.array();
     P.colwise() -= A;
     double area = B(0)*C(1)-C(0)*B(1); // area of triangle (supposed to be nonzero as a valid triangle)
+    //std::cout << "B=" << std::endl << B << std::endl;
+    //std::cout << "C=" << std::endl << C << std::endl;
+    //std::cout << "P=" << std::endl << P << std::endl;
+    //std::cout << "area=" << area << std::endl;
 
     // Barycentric coords of points P (row arrays)
     auto wA = (P.row(0)*(B(1)-C(1)) + P.row(1)*(C(0)-B(0)) + B(0)*C(1) - C(0)*B(1)) / area;

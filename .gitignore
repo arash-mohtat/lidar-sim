@@ -14,3 +14,7 @@ renderings/*.png
 Python/.vscode/
 Python/__pycache__/
 Python/*.py[cod]
+
+# ignore in Cpp folder
+Cpp-ldr/build/
+Cpp-ldr/CMakeLists.txt.user
