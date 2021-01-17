@@ -1,22 +1,49 @@
 #include <iostream>
-//#include <vector>
-//#include <fstream>
 #include <string>
 #include <math.h>
 #include <Eigen/Dense>
-//#include "helpers.h"
-//#include "body.h"
 #include "lidar.h"
 #include <chrono>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #define timeNow() std::chrono::high_resolution_clock::now()
 
 using namespace Eigen;
 
+struct FilePaths{
+    std::string pts_file;
+    std::string mesh_file;
+    std::string result_file; 
+};
+
+FilePaths loadFilePaths(){
+    FilePaths paths;
+#ifdef __CYGWIN__
+    paths.pts_file = "/cygdrive/d/Personal/repos/lidar-sim/coords/hatchback_vertices_vehcoords.txt";
+    paths.mesh_file = "/cygdrive/d/Personal/repos/lidar-sim/coords/hatchback_triangles_vehcoords.txt";
+    paths.result_file = "/cygdrive/d/Personal/repos/lidar-sim/renderings/cpp_vehPtcld_windows.xyz";
+#else
+    paths.pts_file = "/media/arash/DATA/Personal/repos/lidar-sim/coords/hatchback_vertices_vehcoords.txt";
+    paths.mesh_file = "/media/arash/DATA/Personal/repos/lidar-sim/coords/hatchback_triangles_vehcoords.txt";
+    paths.result_file = "/media/arash/DATA/Personal/repos/lidar-sim/renderings/cpp_vehPtcld_linux.xyz";
+#endif
+    return paths;
+}
+
+void test_paths(){
+    auto paths = loadFilePaths();
+    std::cout << paths.pts_file << std::endl;
+    fs::path p = fs::current_path();
+    std::cout << "The current path " << p << '\n' << "root name " << p.root_name() << '\n'
+              << "root directory " << p.root_directory() << std::endl;
+    MatrixXd points_table = Aux::load_csv<MatrixXd>(paths.pts_file);
+    Aux::printLongMatrix(points_table);
+}
+
 void test_Body(){
-    std::string pts_file = "/media/arash/DATA/Personal/repos/lidar-sim/coords/hatchback_vertices_vehcoords.txt";
-    std::string mesh_file = "/media/arash/DATA/Personal/repos/lidar-sim/coords/hatchback_triangles_vehcoords.txt";
-    auto vehicle = Body("Hatchback", pts_file, mesh_file);
+    auto paths = loadFilePaths();
+    auto vehicle = Body("Hatchback", paths.pts_file, paths.mesh_file);
     //auto vehicle = Body("Hatchback");
     vehicle.printSummary();
     auto pts = vehicle.getVertices();
@@ -57,9 +84,8 @@ void test_areInTriangle(){
 void scanHatchback_withLidar(){
 
     // prep vehicle to be scanned
-    std::string pts_file = "/media/arash/DATA/Personal/repos/lidar-sim/coords/hatchback_vertices_vehcoords.txt";
-    std::string mesh_file = "/media/arash/DATA/Personal/repos/lidar-sim/coords/hatchback_triangles_vehcoords.txt";
-    auto vehicle = Body("Hatchback", pts_file, mesh_file);
+    auto paths = loadFilePaths();
+    auto vehicle = Body("Hatchback", paths.pts_file, paths.mesh_file);
     vehicle.move(Vector3d{0.0, 6.4, 0.0});
 
     // prep lidar
@@ -76,13 +102,12 @@ void scanHatchback_withLidar(){
     //std::cout << "grid.rho = " << std::endl << scanned_grid.rho << std::endl;
 
     // save results
-    std::string save_file = "/media/arash/DATA/Personal/repos/lidar-sim/renderings/cpp_vehPtcld.xyz";
-    scanned_grid.toXYZfile(save_file);
+    scanned_grid.toXYZfile(paths.result_file, 0.0, 200.0);
 }
 
 
 int main(){
-
+    //test_paths();
     //test_Body();
     //test_Lidar();
     //test_areInTriangle();

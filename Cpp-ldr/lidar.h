@@ -30,7 +30,7 @@ struct Grid {         // ArrayXXd rather than MatrixXd (since element-wise ops a
     ArrayXXd x;       // x-measurement matrix in lidar coords
     ArrayXXd y;       // y-measurement matrix in lidar coords
     ArrayXXd z;       // z-measurement matrix in lidar coords
-    void toXYZfile(const std::string& save_file);
+    void toXYZfile(const std::string& save_file, double rho_min=0.0, double rho_max=0.0);
 };
 
 struct SphrRect { // A rectangle in AZ-EL indices to use for Grid arrays -> .block(i,j,p,q)

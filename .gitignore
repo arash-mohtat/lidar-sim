@@ -17,4 +17,7 @@ Python/*.py[cod]
 
 # ignore in Cpp folder
 Cpp-ldr/build/
+Cpp-ldr/windows_build/
+Cpp-ldr/linux_build/
 Cpp-ldr/CMakeLists.txt.user
+Cpp-ldr/temp/

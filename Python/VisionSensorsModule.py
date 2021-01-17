@@ -237,11 +237,13 @@ class Lidar(Camera):
         self.grid['rho'][EL_slice, AZ_slice] = np.minimum(self.grid['rho'][EL_slice, AZ_slice],
                                                           rho.reshape((Lidar.sliceLen(EL_slice), Lidar.sliceLen(AZ_slice))))
  
-    def findBoundingRays(self, trngl_RhoAzEl):
+    def findBoundingRays(self, trngl_RhoAzEl, entire_grid=False):
         
         # slices for entire grid (for testing)
-        # EL_slice = slice(0, self.grid['rho'].shape[0]) # number of rows
-        # AZ_slice = slice(0, self.grid['rho'].shape[1]) # number of cols
+        if entire_grid: 
+            EL_slice = slice(0, self.grid['rho'].shape[0]) # number of rows
+            AZ_slice = slice(0, self.grid['rho'].shape[1]) # number of cols
+            return EL_slice, AZ_slice
 
         # find relevant AZ slice (azimuths are listed in ascending order in grid rows)
         AZ_minmax = (np.min(trngl_RhoAzEl[1,:]), np.max(trngl_RhoAzEl[1,:]))
@@ -257,6 +259,37 @@ class Lidar(Camera):
         
         return EL_slice, AZ_slice       
     
+    def findBoundingRays_cpp(self, trngl_RhoAzEl):
+        # this version is closer to the cpp implementation but slightly slower than the np.searchsorted
+        # the utility was to study the match between the two
+
+        def findSlice(grid0, delta_grid, grid_len, intrvl_vals):
+            idx_low = int(np.ceil((intrvl_vals[0] - grid0)/delta_grid))
+            idx_high = int(np.floor((intrvl_vals[1] - grid0)/delta_grid))
+            if (idx_high < 0) or (idx_low > (grid_len-1)):
+                return slice(0,0) # return an arbitrary empty slice (to avoid returning slice(0,1) or slice(len-1,len) by mistake)
+            indices = np.clip(np.array([idx_low, idx_high]), 0, grid_len-1)
+            return slice(int(indices[0]), int(indices[1])+1) # note a slice is [start, stop) so stop should be artificially incremented
+
+        # find relevant AZ slice (azimuths are listed in ascending order in grid rows)
+        AZ_minmax = (np.min(trngl_RhoAzEl[1,:]), np.max(trngl_RhoAzEl[1,:]))
+        AZ_slice = findSlice(self.grid['AZ'][0,0], self.grid['AZ'][0,1] - self.grid['AZ'][0,0],
+                             self.grid['AZ'].shape[1], AZ_minmax)
+        # AZ_idx = np.searchsorted(self.grid['AZ'][0, :], AZ_minmax)
+        # if (AZ_idx[0] != AZ_slice.start or AZ_idx[1] != AZ_slice.stop):
+        #     print("AZ slice not equal")
+
+        # find EL slice (elevations are listed in descending order in grid columns)
+        EL_maxmin = (np.max(trngl_RhoAzEl[2,:]), np.min(trngl_RhoAzEl[2,:]))
+        EL_slice = findSlice(self.grid['EL'][0,0], self.grid['EL'][1,0] - self.grid['EL'][0,0],
+                             self.grid['EL'].shape[0], EL_maxmin)
+        # EL_idx = self.grid['EL'].shape[0] - np.searchsorted(np.flip(self.grid['EL'][:, 0]), EL_maxmin)
+        # if (EL_idx[0] != EL_slice.start or EL_idx[1] != EL_slice.stop):
+        #      print(f'EL slice not equal. EL_idx = {EL_idx}, EL_slice = {EL_slice}')
+        #      #raise ValueError('Mismatch')
+        
+        return EL_slice, AZ_slice
+    
     def scan(self, target, reset_measurements=True):
            
         vertices_cart, vertices_sphr = self.transformCoords(target, coords='both')  # target vertices in lidar cart and sphr coords
@@ -264,16 +297,20 @@ class Lidar(Camera):
             self.grid['rho'] = np.ones_like(self.grid['AZ'])*np.inf
         
         # loop through triangles (each row defines 3 vertex indices defining a trngl)
+        skipped_trngls = 0
         for row in target.triangles:
             trngl_xyz = vertices_cart[:, row] # 3-by-3 matrix with x,y,z rows
             valid, n = Aux.isValidTriangle(trngl_xyz)
             if not valid:
+                skipped_trngls += 1
                 continue # if triangle is ill-defined, then skip this iteration
             EL_slice, AZ_slice = self.findBoundingRays(vertices_sphr[:, row]) # perhaps this can be done before and triangles can be ordered based on average vertices row from close to far (and we can break out of this loop when grid['rho'] contains no inf!)          
-            if Lidar.sliceLen(EL_slice) == 0 or Lidar.sliceLen(AZ_slice) == 0:
+            if Lidar.sliceLen(EL_slice) < 1 or Lidar.sliceLen(AZ_slice) < 1:
+                skipped_trngls += 1
                 continue # if slice is empty, then skip this iteration
             self.castRays(trngl_xyz, n, AZ_slice, EL_slice) # internally accumulates on self.grid['rho']
-        
+        print(f'Skipped {skipped_trngls} triangles out of {target.triangles.shape[0]}.')
+
         # spherical transform when all rho's are updated (add channel vertical corrections if needed)
         self.grid['x'] = self.grid['rho']*np.cos(self.grid['EL'])*np.sin(self.grid['AZ'])
         self.grid['y'] = self.grid['rho']*np.cos(self.grid['EL'])*np.cos(self.grid['AZ'])
@@ -382,7 +419,7 @@ class Aux: # just a namespace for auxiliary helper functions
 def main():
     vehicle = Body('hatchback')
     vehicle.assignGeometry('hatchback_vertices_vehcoords.txt', 'hatchback_triangles_vehcoords.txt', folder_name='coords')
-    vehicle.move(np.array([2.0, 6.0, 0]))
+    vehicle.move(np.array([0.0, 6.0, 0.0]))
 
     ground = Body('Ground_2trngls') #, transform=np.eye(4))
     ground.assignGeometry(np.array([[-20.0,0,0],[-20.0,30,0],[20.0,0,0],[20.0,30,0]]), np.array([[0,1,2],[2,3,1]]))

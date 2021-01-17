@@ -35,7 +35,7 @@ M load_csv (const std::string & path) {
     return Map<const Matrix<typename M::Scalar, M::RowsAtCompileTime, M::ColsAtCompileTime, RowMajor>>(values.data(), rows, values.size()/rows);
 }
 
-std::pair<bool, Vector3d> isValidTriangle(const Matrix3d& trngl_xyz, double tolerance=1e-6);
+std::pair<bool, Vector3d> isValidTriangle(const Matrix3d& trngl_xyz, double tolerance=1e-12);
 
 Array<bool, Dynamic, 1> areInTriangle(const Matrix<double, 3, Dynamic>& pts_xyz, const Matrix3d& trngl_xyz, const Vector3d& unit_normal);
 

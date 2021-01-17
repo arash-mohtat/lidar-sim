@@ -65,6 +65,11 @@ Matrix<double, 3, Dynamic> Body::getVertices(const Matrix4d& viewpoint) const {
 }
 
 std::vector<Matrix3d> Body::getTriangles(const Matrix4d& viewpoint) const {
+    // trngl_xyz << xA, xB, xC,
+    //              yA, yB, yC,
+    //              zA, zB, zC; //with A, B, C vertices
+    // And then we have a vector of such triangles as elements
+    
     auto pts_xyz = getVertices(viewpoint); // 3-by-N matrix
     std::vector<Matrix3d> triangles;       // vector of n 3-by-3 matrices
     Matrix3d M;

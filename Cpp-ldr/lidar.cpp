@@ -65,16 +65,18 @@ Grid Lidar::scan(const Body& target, bool reset_measurements){
     std::vector<Matrix3d> triangles_xyz = target.getTriangles(m_transform); // get body triangles from lidar's point-of-view
 
     // loop through triangles and cast relevant rays on
-    int skipped_trngls = 0;
-    SphrRect AZ_EL{0, 0, m_FOV_resolution.vertical, m_FOV_resolution.horizontal}; // the entire grid
+    int skipped_trngls_1 = 0; // skipped due to trngl invalidity
+    int skipped_trngls_2 = 0; // skipped due to not being seen by rays
+    //SphrRect AZ_EL{0, 0, m_FOV_resolution.vertical, m_FOV_resolution.horizontal}; // the entire grid
     for (const auto& trngl_xyz : triangles_xyz){
         std::pair<bool, Vector3d> result = Aux::isValidTriangle(trngl_xyz);
-        if (!result.first) {skipped_trngls +=1; continue;} // if tngl not valid
-        //SphrRect AZ_EL = findAZ_EL_slice(trngl_xyz); // TODO: needs debugging and can replace line above for
-        if ((AZ_EL.p < 1) || (AZ_EL.q < 1)) {skipped_trngls +=1; continue;}// if slice is empty, continue
+        if (!result.first) {skipped_trngls_1 +=1; continue;} // if tngl not valid
+        SphrRect AZ_EL = findAZ_EL_slice(trngl_xyz); // TODO: needs debugging and can replace line above for
+        if ((AZ_EL.p < 1) || (AZ_EL.q < 1)) {skipped_trngls_2 +=1; continue;}// if slice is empty, continue
         castRays(trngl_xyz, result.second, AZ_EL); // result.second = unit_normal
     }
-    std::cout << "#skipped triangles when scanning was: " << skipped_trngls << ", out of: " << triangles_xyz.size() << std::endl;
+    std::cout << "Skipped (invalidity) " << skipped_trngls_1 << " triangles out of " << triangles_xyz.size() << std::endl;
+    std::cout << "Skipped (not seen by any ray) " << skipped_trngls_2 << " triangles out of " << triangles_xyz.size() << std::endl;
 
     // prep x,y,z measurements via spherical transform when all rho's are updated
     m_grid.x = m_grid.rho * cos(m_grid.EL) * sin(m_grid.AZ);
@@ -87,20 +89,26 @@ std::array<int, 2> Lidar::findSlice(const double& grid0, const double& delta_gri
                                    const double& val_low, const double& val_high) {
     int idx_low = static_cast<int> (ceil((val_low - grid0)/delta_grid));
     int idx_high = static_cast<int> (floor((val_high - grid0)/delta_grid));
+    if (idx_high < 0 || idx_low > (length-1)){
+        return {0, 0}; // return an arbitrary empty slice
+    }
     idx_low = std::clamp(idx_low, 0 , length-1);
     idx_high = std::clamp(idx_high, 0 , length-1);
     return {idx_low, idx_high - idx_low + 1}; // index low, index sequence length
 }
 
 SphrRect Lidar::findAZ_EL_slice(const Matrix3d& trngl_xyz) const {
+    // trngl_xyz << xA, xB, xC,
+    //              yA, yB, yC,
+    //              zA, zB, zC; //with A, B, C vertices
 
     // transform triangle vertices to spherical coords
     Array3d rho_vertices = trngl_xyz.colwise().norm().array();
     Array3d AZ_vertices; //Eigen doesn't support atan2 and not worth converting to valarray
     for (int idx = 0; idx < 3; ++idx) {
-        AZ_vertices(idx) = atan2(trngl_xyz(idx, 0), trngl_xyz(idx, 1));
+        AZ_vertices(idx) = atan2(trngl_xyz(0, idx), trngl_xyz(1, idx));
     }
-    Array3d EL_vertices = asin(trngl_xyz.col(2).array()/rho_vertices); //asin(z/rho)
+    Array3d EL_vertices = asin(trngl_xyz.row(2).transpose().array()/rho_vertices); //asin(z/rho)
 
     // find AZ and EL slices. Note: azimuths are columns growing from left to right, while elevations
     // are rows with values decreasing from top to bottom
@@ -144,8 +152,10 @@ void Lidar::castRays(const Matrix3d& trngl_xyz, const Vector3d& unit_normal,
             = rho_grid.min(m_grid.rho.block(AZ_EL.i, AZ_EL.j, AZ_EL.p, AZ_EL.q));
 }
 
-void Grid::toXYZfile(const std::string& save_file){
+/*
+void Grid::toXYZfile(const std::string& save_file) {
     // TODO: add option to discard inf (2*m_range) measurements
+    // For now: setting out-of-range values to zero (instead of deleting them)
     std::ofstream file(save_file);
     if (file.is_open()) {
         Map<ArrayXd> x_flat(x.data(), x.size());
@@ -153,6 +163,26 @@ void Grid::toXYZfile(const std::string& save_file){
         Map<ArrayXd> z_flat(z.data(), z.size());
         ArrayXXd xyz(x.size(), 3);
         xyz << x_flat, y_flat, z_flat;
+        file << xyz;
+        std::cout << "saved to file ..." << std::endl;
+      }
+}
+*/
+
+void Grid::toXYZfile(const std::string& save_file, double rho_min, double rho_max) {
+    // TODO: add option to discard inf (2*m_range) measurements
+    // For now: setting out-of-range values to zero (instead of deleting them)
+    std::ofstream file(save_file);
+    if (rho_max == 0) {
+        rho_max = rho.maxCoeff();
+    }
+    if (file.is_open()) {
+        Map<ArrayXd> AZ_flat(AZ.data(), AZ.size());
+        Map<ArrayXd> EL_flat(EL.data(), EL.size());
+        Map<ArrayXd> rho_flat(rho.data(), rho.size());
+        rho_flat = (rho_flat<rho_min || rho_flat>rho_max).select(0.0, rho_flat);       
+        ArrayXXd xyz(rho_flat.size(), 3);
+        xyz << rho_flat*cos(EL_flat)*sin(AZ_flat), rho_flat*cos(EL_flat)*cos(AZ_flat), rho_flat*sin(EL_flat);
         file << xyz;
         std::cout << "saved to file ..." << std::endl;
       }
